@@ -1,4 +1,5 @@
 config.ini
+static/tex-server/user_config.js
 __pycache__/
 static/pdfjs
 static/main.pdf

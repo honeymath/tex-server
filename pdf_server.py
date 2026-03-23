@@ -80,6 +80,7 @@ def create_app(static_dir=None):
     # Browser double-click PDF -> emit("pdf_control_receive") -> forward to Vim via task
     @socketio.on('pdf_control_receive')
     def handle_reverse_search(data):
+        print(f"[pdf_server] reverse search request: {data}", flush=True)
         # 转发给所有连接的 Vim 客户端（改用广播 reverse_search_result，由 channel.py 监听）
         # for sid, client in vim_clients.items():
         #     try:
@@ -97,6 +98,7 @@ def create_app(static_dir=None):
                 'line': int(line),
             })
         except Exception as e:
+            print(f"[pdf_server] reverse search error: {e}", flush=True)
             socketio.emit('reverse_search_result', {
                 'error': str(e),
             })

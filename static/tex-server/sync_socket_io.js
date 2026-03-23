@@ -1,4 +1,5 @@
 import { RENDER_SCALE, SERVER_URL, SOCKET_CHANNEL, setFilestamp, getFilestamp, socket } from "./config.js";
+import { EDITOR_BRIDGE_ENABLED, EDITOR_BRIDGE_URL } from "./user_config.js";
 
 let timestamp = 0;
 let fresh = true;
@@ -150,6 +151,16 @@ socket.on(SOCKET_CHANNEL, (data) => {
     if (data.type === "reload" && window.PDFViewerApplication) {
         updatePageLocation(data);
     }
+});
+
+socket.on("reverse_search_result", (data) => {
+    console.log("reverse_search_result received:", data);
+    if (!EDITOR_BRIDGE_ENABLED || data.error) return;
+    const url = `${EDITOR_BRIDGE_URL}/open?filename=${encodeURIComponent(data.file)}&line=${data.line}`;
+    console.log("Opening editor:", url);
+    fetch(url, { mode: "no-cors" }).catch((err) => {
+        console.warn("Editor bridge request failed:", err);
+    });
 });
 
 document.addEventListener("visibilitychange", handleReload);
