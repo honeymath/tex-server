@@ -1,0 +1,8 @@
+/* The following logic is to disable the inset-inline-start feature */
+#outerContainer.sidebarOpen #viewerContainer:not(.pdfPresentationMode) {
+  inset-inline-start: 0 !important;
+}
+#outerContainer.sidebarOpen #loadingBar {
+  inset-inline-start: 0 !important;
+}
+
