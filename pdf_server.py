@@ -46,7 +46,16 @@ def check_port(host, port):
             return False
 
 
-def create_app(static_dir=None):
+def create_app(static_dir=None, is_master=True, master_url=None):
+    """
+    Create the Flask app.
+
+    Args:
+        static_dir: workspace directory for PDF/synctex/JSON files
+        is_master: if True, run Hub (Vim dispatch) + Worker; if False, Worker only
+        master_url: base URL of master instance (e.g. "http://127.0.0.1:7777"),
+                    used by workers to forward reverse search results
+    """
     if static_dir is None:
         static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 
@@ -59,49 +68,86 @@ def create_app(static_dir=None):
     from send_socket_message_to_pdfjs import pdf_routes
     app.register_blueprint(pdf_routes)
 
-    # === Vim client 连接管理 ===
-    @socketio.on('connect')
-    def on_vim_connect():
-        sid = str(flask_request.sid)
-        VimClient(sid)
+    # === Hub: Vim client management (master only) ===
+    if is_master:
+        @socketio.on('connect')
+        def on_vim_connect():
+            sid = str(flask_request.sid)
+            VimClient(sid)
 
-    @socketio.on('disconnect')
-    def on_vim_disconnect():
-        sid = str(flask_request.sid)
-        removed = vim_clients.pop(sid, None)
-        if removed:
-            print(f"[pdf_server] Vim client disconnected: {sid}")
+        @socketio.on('disconnect')
+        def on_vim_disconnect():
+            sid = str(flask_request.sid)
+            removed = vim_clients.pop(sid, None)
+            if removed:
+                print(f"[pdf_server] Vim client disconnected: {sid}")
 
-    @socketio.on('task_result')
-    def on_task_result(data):
-        pass  # 反向查找不需要返回值
+        @socketio.on('task_result')
+        def on_task_result(data):
+            pass  # 反向查找不需要返回值
+
+        # === Reverse search result relay ===
+        # When a client (e.g. math VitePress) already knows file+line,
+        # it emits reverse_search_result directly. Relay to all other clients.
+        @socketio.on('reverse_search_result')
+        def relay_reverse_search(data):
+            from flask_socketio import emit
+            print(f"[pdf_server] relay reverse_search_result: {data}", flush=True)
+            emit('reverse_search_result', data, broadcast=True)
+
+        # === Hub endpoint: receive forwarded results from worker instances ===
+        @app.route("/hub/reverse_search_result", methods=["POST"])
+        def hub_receive_reverse_search():
+            data = flask_request.get_json()
+            print(f"[pdf_server:hub] received from worker: {data}", flush=True)
+            socketio.emit('reverse_search_result', data)
+            return jsonify({"status": "ok"})
+
+    def _forward_to_master(result_data):
+        """Worker: forward reverse search result to master via HTTP POST."""
+        import requests
+        url = f"{master_url}/hub/reverse_search_result"
+        try:
+            resp = requests.post(url, json=result_data, timeout=3)
+            print(f"[pdf_server:worker] forwarded to master: {resp.status_code}", flush=True)
+        except Exception as e:
+            print(f"[pdf_server:worker] failed to forward to master: {e}", flush=True)
 
     # === Reverse search ===
-    # Browser double-click PDF -> emit("pdf_control_receive") -> forward to Vim via task
+    # Browser double-click PDF -> emit("pdf_control_receive") -> SyncTeX reverse lookup
     @socketio.on('pdf_control_receive')
     def handle_reverse_search(data):
         print(f"[pdf_server] reverse search request: {data}", flush=True)
-        # 转发给所有连接的 Vim 客户端（改用广播 reverse_search_result，由 channel.py 监听）
-        # for sid, client in vim_clients.items():
-        #     try:
-        #         client.send_task("run_python_vim_script", "pdfsync_decode", data)
-        #     except Exception as e:
-        #         print(f"[pdf_server] Failed to forward to {sid}: {e}")
 
-        # 同时本地也处理（返回给浏览器显示）
         try:
-            from tools.pdfsync_decode import handler
-            filepath, line = handler(**data)
-            print(f"[pdf_server] reverse search: {filepath}:{line}", flush=True)
-            socketio.emit('reverse_search_result', {
-                'file': str(filepath),
-                'line': int(line),
-            })
+            from synctex_tool import reverse_lookup
+            import json
+
+            json_dir = os.path.join(static_dir, '')
+            with open(os.path.join(json_dir, 'reverse_map.json'), 'r') as f:
+                reverse_map = json.load(f)
+            with open(os.path.join(json_dir, 'file_map.json'), 'r') as f:
+                file_map = json.load(f)
+
+            result = reverse_lookup(
+                reverse_map, file_map,
+                page=data.get('pageNumber'),
+                x=data.get('pageX_pdf'),
+                y=data.get('pageY_pdf'),
+            )
+            print(f"[pdf_server] reverse search: {result['file']}:{result['line']}", flush=True)
+            result_data = {'file': result['file'], 'line': result['line']}
+
+            # Local broadcast (for browser editor bridge)
+            socketio.emit('reverse_search_result', result_data)
+
+            # Worker: also forward to master for Vim dispatch
+            if not is_master and master_url:
+                _forward_to_master(result_data)
+
         except Exception as e:
             print(f"[pdf_server] reverse search error: {e}", flush=True)
-            socketio.emit('reverse_search_result', {
-                'error': str(e),
-            })
+            socketio.emit('reverse_search_result', {'error': str(e)})
 
     # === Index: redirect to PDF viewer ===
     @app.route("/")
@@ -111,13 +157,26 @@ def create_app(static_dir=None):
     # === Health check ===
     @app.route("/health")
     def health():
-        return jsonify({"status": "ok", "server": "pdf_server"})
+        return jsonify({
+            "status": "ok",
+            "server": "pdf_server",
+            "role": "master" if is_master else "worker",
+        })
 
     return app
 
 
 if __name__ == '__main__':
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
+    parser = argparse.ArgumentParser(description='PDF preview server with SyncTeX support')
+    parser.add_argument('--static-dir', default=None,
+                        help='Path to static directory (default: <script_dir>/static)')
+    parser.add_argument('--host', default='0.0.0.0')
+    parser.add_argument('--port', type=int, default=None,
+                        help='Port (default: resolved from config.ini [workspaces])')
+    args = parser.parse_args()
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'config.ini')
     if not os.path.exists(config_path):
         print(f"[ERROR] config.ini not found at {config_path}\n"
               f"Please copy config.ini.example to config.ini and set your port.",
@@ -126,14 +185,40 @@ if __name__ == '__main__':
 
     config = configparser.ConfigParser()
     config.read(config_path)
-    port = config.getint('server', 'port')
-    host = '0.0.0.0'
+
+    # Resolve static_dir
+    static_dir = args.static_dir
+    if static_dir is None:
+        static_dir = os.path.join(script_dir, 'static')
+    static_dir = os.path.abspath(static_dir)
+    dir_name = os.path.basename(static_dir)
+
+    # Resolve port: CLI flag > [workspaces] > [server]
+    host = args.host
+    if args.port is not None:
+        port = args.port
+    elif config.has_section('workspaces') and config.has_option('workspaces', dir_name):
+        port = config.getint('workspaces', dir_name)
+    else:
+        port = config.getint('server', 'port')
 
     if not check_port(host, port):
         print(f"[ERROR] Port {port} is already in use. "
               f"Another server (channel.py?) may be running.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[pdf_server] Starting on http://{host}:{port}")
-    app = create_app()
+    # Resolve master/worker role
+    master_name = config.get('server', 'master', fallback=None)
+    is_master = (master_name is None) or (dir_name == master_name)
+    master_url = None
+    if not is_master and master_name:
+        if config.has_option('workspaces', master_name):
+            master_port = config.getint('workspaces', master_name)
+            master_url = f"http://127.0.0.1:{master_port}"
+
+    role = "master" if is_master else "worker"
+    print(f"[pdf_server] Starting on http://{host}:{port}  static_dir={static_dir}  role={role}")
+    if master_url:
+        print(f"[pdf_server] Master at {master_url}")
+    app = create_app(static_dir=static_dir, is_master=is_master, master_url=master_url)
     socketio.run(app, host=host, port=port, allow_unsafe_werkzeug=True)

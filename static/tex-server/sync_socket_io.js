@@ -1,4 +1,4 @@
-import { RENDER_SCALE, SERVER_URL, SOCKET_CHANNEL, setFilestamp, getFilestamp, socket } from "./config.js";
+import { RENDER_SCALE, SERVER_URL, SOCKET_CHANNEL, setFilestamp, getFilestamp, socket, PATH_PREFIX } from "./config.js";
 import { EDITOR_BRIDGE_ENABLED, EDITOR_BRIDGE_URL } from "./user_config.js";
 
 let timestamp = 0;
@@ -128,7 +128,7 @@ console.log(`🔵 Added blue marker at Y=${scrollY} on page ${page}`);
 function handleReload() {
     if (document.visibilityState === "visible") {
         console.log("👁️ Document is now visible");
-        fetch('/send_pdf_reload')
+        fetch(PATH_PREFIX + '/send_pdf_reload')
             .then(response => response.json())
             .then(data => {
                 console.log("📄 Reload data received:", data);

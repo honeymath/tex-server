@@ -1,2 +1,15 @@
 [server]
 port = 7777
+master = static
+
+# Map workspace directory names to ports.
+# Each workspace runs its own server instance on its assigned port.
+# Key = directory name passed to --static-dir (or --output-dir).
+# Value = port number.
+[workspaces]
+static = 7777
+alpha = 7771
+beta = 7772
+gamma = 7773
+delta = 7774
+epsilon = 7775

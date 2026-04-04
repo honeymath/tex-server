@@ -141,6 +141,7 @@ Rejected because:
 - pdf_server would need to become both Socket.IO server (for browser) and Socket.IO client (for hub) — significant complexity
 - The Hub logic already exists inside pdf_server.py — extracting it to a separate process duplicates infrastructure
 - One more thing to monitor, restart, and debug
+- **Uniqueness not guaranteed by design:** A standalone hub is just another process — nothing structurally prevents someone from accidentally starting two hubs, or forgetting to start one. The master/worker approach ties hub identity to a specific port in `config.ini`, which guarantees exactly one hub exists by configuration. The uniqueness is enforced at the port level: only one process can bind a given port, and only the process on the designated master port activates hub logic. A standalone hub would recreate the same "which one is the real hub?" coordination problem that multi-instance was supposed to solve
 
 ### B. Vim connects to all instances simultaneously
 

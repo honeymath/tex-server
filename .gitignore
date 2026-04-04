@@ -1,6 +1,8 @@
 config.ini
 static/tex-server/user_config.js
 __pycache__/
+.claude
+.agents
 static/pdfjs
 static/main.pdf
 static/main.synctex
@@ -8,6 +10,13 @@ static/main.synctex.gz
 static/forward_map.json
 static/reverse_map.json
 static/file_map.json
+
+# Workspace directories (symlink dirs for multi-instance)
+alpha/
+beta/
+gamma/
+delta/
+epsilon/
 
 # LaTeX build artifacts
 *.aux

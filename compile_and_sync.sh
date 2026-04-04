@@ -2,10 +2,13 @@
 #
 # compile_and_sync.sh - LaTeX 编译 + PDF 正向搜索脚本
 #
-# 用法: compile_and_sync.sh <searchfile> <line>
+# 用法: compile_and_sync.sh <searchfile> <line> [zoom] [refresh] [output_dir]
 #
 #   searchfile   - 当前编辑的 .tex 文件的路径
 #   line         - 光标所在行号
+#   zoom         - 缩放比例 (默认 1.0)
+#   refresh      - 是否刷新 (默认 1)
+#   output_dir   - PDF/synctex 输出目录 (默认 $SCRIPT_DIR/static)
 #
 # 服务器地址和端口从 config.ini 读取。
 # PDF 输出到 <脚本所在目录>/static/main.pdf。
@@ -30,24 +33,16 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     exit 1
 fi
 
-PORT=$(python3 -c "
-import configparser, sys
-c = configparser.ConfigParser()
-c.read('$CONFIG_FILE')
-print(c.get('server', 'port'))
-")
-PREVIEW_HOST="http://127.0.0.1:${PORT}"
-
-# 输出目录: 脚本所在目录/static
-OUTPUT_DIR="$SCRIPT_DIR/static"
-
 # === 检查参数 ===
 if [[ $# -lt 2 ]]; then
-    echo "用法: $0 <searchfile> <line>" >&2
+    echo "用法: $0 <searchfile> <line> [zoom] [refresh] [output_dir]" >&2
     echo "" >&2
     echo "参数说明:" >&2
     echo "  searchfile   - 当前编辑的 .tex 文件路径" >&2
     echo "  line         - 光标行号" >&2
+    echo "  zoom         - 缩放比例 (默认 1.0)" >&2
+    echo "  refresh      - 是否刷新 (默认 1)" >&2
+    echo "  output_dir   - 输出目录 (默认 \$SCRIPT_DIR/static)" >&2
     exit 1
 fi
 
@@ -55,6 +50,22 @@ SEARCHFILE="$1"
 LINE="$2"
 ZOOM="${3:-1.0}"
 REFRESH="${4:-1}"
+OUTPUT_DIR="${5:-$SCRIPT_DIR/static}"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" 2>/dev/null && pwd || echo "$OUTPUT_DIR")"
+DIR_NAME="$(basename "$OUTPUT_DIR")"
+
+# === 从 config.ini 解析端口: [workspaces] > [server] ===
+PORT=$(python3 -c "
+import configparser, sys
+c = configparser.ConfigParser()
+c.read('$CONFIG_FILE')
+dir_name = '$DIR_NAME'
+if c.has_section('workspaces') and c.has_option('workspaces', dir_name):
+    print(c.get('workspaces', dir_name))
+else:
+    print(c.get('server', 'port'))
+")
+PREVIEW_HOST="http://127.0.0.1:${PORT}"
 
 # 验证参数
 if [[ ! -f "$SEARCHFILE" ]]; then
@@ -113,6 +124,11 @@ else
 fi
 
 cd "$COMPILE_DIR"
+
+# === 清理旧的产物，避免编译失败时残留过期数据 ===
+echo "==> 清理旧的 synctex 和 map 文件..."
+rm -f "$OUTPUT_DIR/main.synctex.gz" "$OUTPUT_DIR/main.synctex"
+rm -f "$OUTPUT_DIR/forward_map.json" "$OUTPUT_DIR/reverse_map.json" "$OUTPUT_DIR/file_map.json"
 
 echo ""
 echo "==> 编译 LaTeX 文档..."
