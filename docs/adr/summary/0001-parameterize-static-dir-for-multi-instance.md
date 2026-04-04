@@ -7,8 +7,9 @@
 将 `static` 目录作为 CLI 参数传入，每个智能体启动独立的服务进程，指向各自的目录和端口。
 
 ## 改动范围
-- `pdf_server.py`：`__main__` 加 `--static-dir` 参数
-- `compile_and_sync.sh`：加输出目录和端口参数
+- `config.ini`：新增 `[workspaces]` section，映射目录名到端口（如 `stafuk = 7771`）
+- `pdf_server.py`：`__main__` 加 `--static-dir` 参数，端口从 config 按目录名查
+- `compile_and_sync.sh`：加输出目录参数，端口从 config 按目录名查（不需要单独传端口）
 
 ## 不需要改的
 `synctex_tool.py`、`socketapp.py`、前端 JS、Socket.IO 协议——全部已经参数化或天然隔离。

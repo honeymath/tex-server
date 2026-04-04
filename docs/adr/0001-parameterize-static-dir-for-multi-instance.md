@@ -39,7 +39,7 @@ Shared infrastructure (identical across all instances):
 
 1. `pdf_server.py` `__main__` block (line 160) calls `create_app()` with no arguments — no CLI flag to pass a custom static dir
 2. `compile_and_sync.sh` line 42 hardcodes `OUTPUT_DIR="$SCRIPT_DIR/static"` — no parameter to override
-3. `compile_and_sync.sh` reads port from a single `config.ini` — cannot target a different server instance
+3. `compile_and_sync.sh` reads port from a single `config.ini` with only one `[server]` section — cannot resolve which port belongs to which workspace
 
 ## Research
 
@@ -65,22 +65,38 @@ Flask + Socket.IO process: ~20-30MB RSS per instance. For 10 agents: ~200-300MB.
 
 Changes required:
 
-### 1. `pdf_server.py` — add `--static-dir` CLI argument
+### 1. `config.ini` — workspace-to-port mapping
+
+Extend `config.ini` from a single `[server]` section to a `[workspaces]` section that maps static directory names to ports:
+
+```ini
+[workspaces]
+static = 7777
+stafuk = 7771
+stutuka = 7772
+```
+
+The key is the static directory name (as passed to `--static-dir`). The value is the port. This is the single source of truth for port allocation — both `pdf_server.py` and `compile_and_sync.sh` read from here.
+
+Backward compatibility: if `[workspaces]` section is absent, fall back to `[server] port` as before.
+
+### 2. `pdf_server.py` — add `--static-dir` CLI argument
 
 `__main__` block adds `--static-dir` to `argparse`, passes value to `create_app(static_dir=args.static_dir)`. When omitted, falls back to current default (`<script_dir>/static`).
 
-Port already comes from `config.ini` or could be added as `--port` override for convenience (avoids needing a separate `config.ini` per instance).
+Port resolution: look up `config.ini` `[workspaces]` section using the static-dir name as key.
 
-### 2. `compile_and_sync.sh` — add output directory and port parameters
+### 3. `compile_and_sync.sh` — add output directory parameter (single new parameter)
 
-New parameters (backward-compatible — all optional with current defaults):
+New parameter (backward-compatible, optional with current default):
 
 - `$5` (or a named flag) = output directory for PDF, synctex, and JSON maps. Default: `$SCRIPT_DIR/static`
-- `$6` (or a named flag) = server port to curl. Default: read from `config.ini`
+
+Port resolution: the script looks up the directory name in `config.ini` `[workspaces]` to find the port. No separate port parameter needed.
 
 Lines affected:
 - Line 42: `OUTPUT_DIR` reads from parameter instead of hardcoded path
-- Line 33-38: port can be overridden by parameter
+- Lines 33-38: port lookup changes from `config['server']['port']` to `config['workspaces'][dir_name]`
 - Lines 119-120, 148-150, 159-160, 166-170, 186-189: all already use `$OUTPUT_DIR` — no additional changes
 
 ### 3. Workspace directory setup
@@ -139,7 +155,7 @@ Rejected because:
 - Backward compatible — omitting `--static-dir` preserves current behavior
 
 ### Negative
-- Each instance occupies a port — need a port allocation convention (e.g., base + N)
+- Each instance occupies a port — managed centrally in `config.ini` `[workspaces]` section
 - Each workspace directory needs symlinks to `pdfjs/` and `tex-server/` — small setup cost
 - No single dashboard listing all active workspaces (can be added later as a separate lightweight service if needed)
 
@@ -150,6 +166,7 @@ Rejected because:
 
 | File | Change |
 |------|--------|
-| `pdf_server.py` | `__main__`: add `--static-dir` and optionally `--port` to argparse |
-| `compile_and_sync.sh` | Add output-dir and port parameters, update `OUTPUT_DIR` assignment |
+| `config.ini` | Add `[workspaces]` section mapping directory names to ports |
+| `pdf_server.py` | `__main__`: add `--static-dir` to argparse, look up port from `config.ini` `[workspaces]` |
+| `compile_and_sync.sh` | Add output-dir parameter, look up port from `config.ini` `[workspaces]` by dir name |
 | (new, optional) `init_workspace.sh` | Helper to create workspace dir with symlinks |
