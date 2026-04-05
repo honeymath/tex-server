@@ -2,13 +2,13 @@
 #
 # compile_and_sync.sh - LaTeX 编译 + PDF 正向搜索脚本
 #
-# 用法: compile_and_sync.sh <searchfile> <line> [zoom] [refresh] [output_dir]
+# 用法: compile_and_sync.sh <searchfile> <line> <output_dir> [zoom] [refresh]
 #
 #   searchfile   - 当前编辑的 .tex 文件的路径
-#   line         - 光标所在行号
+#   line         - 刚编辑的行号 (PDF viewer 跳转到对应页面，方便观众定位)
+#   output_dir   - workspace 输出目录 (通常从 $TEX_WORKSPACE_DIR 获取)
 #   zoom         - 缩放比例 (默认 1.0)
 #   refresh      - 是否刷新 (默认 1)
-#   output_dir   - PDF/synctex 输出目录 (默认 $SCRIPT_DIR/static)
 #
 # 服务器地址和端口从 config.ini 读取。
 # PDF 输出到 <脚本所在目录>/static/main.pdf。
@@ -34,23 +34,30 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 fi
 
 # === 检查参数 ===
-if [[ $# -lt 2 ]]; then
-    echo "用法: $0 <searchfile> <line> [zoom] [refresh] [output_dir]" >&2
+if [[ $# -lt 3 ]]; then
+    echo "用法: $0 <searchfile> <line> <output_dir> [zoom] [refresh]" >&2
     echo "" >&2
-    echo "参数说明:" >&2
+    echo "必须参数:" >&2
     echo "  searchfile   - 当前编辑的 .tex 文件路径" >&2
-    echo "  line         - 光标行号" >&2
+    echo "  line         - 你刚编辑的行号 (PDF viewer 会跳转到对应页面，" >&2
+    echo "                 方便观众快速定位修改位置。请勿传 1！)" >&2
+    echo "  output_dir   - workspace 输出目录 (如 ~/repositories/tex-server/alpha)" >&2
+    echo "                 通常为 ~/repositories/tex-server/\$TEX_WORKSPACE" >&2
+    echo "" >&2
+    echo "可选参数:" >&2
     echo "  zoom         - 缩放比例 (默认 1.0)" >&2
     echo "  refresh      - 是否刷新 (默认 1)" >&2
-    echo "  output_dir   - 输出目录 (默认 \$SCRIPT_DIR/static)" >&2
+    echo "" >&2
+    echo "示例:" >&2
+    echo "  $0 /path/to/chapter.tex 42 ~/repositories/tex-server/\$TEX_WORKSPACE" >&2
     exit 1
 fi
 
 SEARCHFILE="$1"
 LINE="$2"
-ZOOM="${3:-1.0}"
-REFRESH="${4:-1}"
-OUTPUT_DIR="${5:-$SCRIPT_DIR/static}"
+OUTPUT_DIR="$3"
+ZOOM="${4:-1.0}"
+REFRESH="${5:-1}"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" 2>/dev/null && pwd || echo "$OUTPUT_DIR")"
 DIR_NAME="$(basename "$OUTPUT_DIR")"
 
@@ -67,6 +74,17 @@ else:
 ")
 PREVIEW_HOST="http://127.0.0.1:${PORT}"
 
+echo ""
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║  推送目标                                            ║"
+echo "╠══════════════════════════════════════════════════════╣"
+printf "║  工作区: %-43s ║\n" "$DIR_NAME"
+printf "║  目录:   %-43s ║\n" "$OUTPUT_DIR"
+printf "║  端口:   %-43s ║\n" "$PORT"
+printf "║  地址:   %-43s ║\n" "$PREVIEW_HOST"
+echo "╚══════════════════════════════════════════════════════╝"
+echo ""
+
 # 验证参数
 if [[ ! -f "$SEARCHFILE" ]]; then
     echo "错误: 文件不存在: $SEARCHFILE" >&2
@@ -79,6 +97,12 @@ SEARCHFILE="$(cd "$(dirname "$SEARCHFILE")" && pwd)/$(basename "$SEARCHFILE")"
 if ! [[ "$LINE" =~ ^[0-9]+$ ]]; then
     echo "错误: 行号必须是数字: $LINE" >&2
     exit 1
+fi
+
+if [[ "$LINE" -eq 1 ]]; then
+    echo "警告: 行号为 1 — PDF viewer 将跳转到第 1 页。" >&2
+    echo "  如果你刚编辑了其他位置，请传实际编辑行号，" >&2
+    echo "  这样观众可以直接看到修改内容，无需手动翻页。" >&2
 fi
 
 # === 查找 main.tex（向上查找） ===
@@ -197,7 +221,10 @@ echo "调整后坐标: x=$X_ADJUSTED, y=$Y_ADJUSTED"
 CURL_URL="${PREVIEW_HOST}/send_pdf_reload"
 CURL_PARAMS="page=${PAGE}&x=${X_ADJUSTED}&y=${Y_ADJUSTED}&zoom=${ZOOM}&refresh=${REFRESH}"
 
-if curl -s -f "${CURL_URL}?${CURL_PARAMS}" > /dev/null 2>&1; then
+FULL_URL="${CURL_URL}?${CURL_PARAMS}"
+echo "Forward URL: $FULL_URL"
+
+if curl -s -f "$FULL_URL" > /dev/null 2>&1; then
     echo "PDF viewer 已更新"
 else
     echo "警告: 无法连接到 PDF viewer (${PREVIEW_HOST})" >&2
@@ -205,4 +232,9 @@ else
 fi
 
 echo ""
-echo "完成!"
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║  完成 ✓                                              ║"
+echo "╠══════════════════════════════════════════════════════╣"
+printf "║  PDF → %-45s ║\n" "$OUTPUT_DIR/main.pdf"
+printf "║  端口  %-45s ║\n" "$PORT ($DIR_NAME)"
+echo "╚══════════════════════════════════════════════════════╝"

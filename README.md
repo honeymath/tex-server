@@ -76,10 +76,10 @@ Open browser: `http://localhost:7777`
 ### 5. Compile and forward search
 
 ```bash
-./compile_and_sync.sh /path/to/chapter.tex 42
+./compile_and_sync.sh /path/to/chapter.tex 42 ./static
 ```
 
-This compiles LaTeX, copies the PDF to the workspace directory, and tells the browser to jump to the corresponding location.
+This compiles LaTeX, copies the PDF to the workspace directory, and tells the browser to jump to the page corresponding to line 42.
 
 ## Parameters
 
@@ -98,16 +98,16 @@ python pdf_server.py [--static-dir DIR] [--host HOST] [--port PORT]
 ### compile_and_sync.sh
 
 ```
-./compile_and_sync.sh <searchfile> <line> [zoom] [refresh] [output_dir]
+./compile_and_sync.sh <searchfile> <line> <output_dir> [zoom] [refresh]
 ```
 
 | Argument | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `searchfile` | yes | | Path to the `.tex` file being edited |
-| `line` | yes | | Cursor line number |
+| `line` | yes | | Line number you just edited. The PDF viewer jumps to the corresponding page so the viewer sees your change immediately. **Do not pass 1** unless it's a first compile with no specific edit. |
+| `output_dir` | yes | | Workspace directory (e.g. `~/repositories/tex-server/alpha`). Typically `~/repositories/tex-server/$TEX_WORKSPACE`. |
 | `zoom` | no | `1.0` | Zoom level |
 | `refresh` | no | `1` | Whether to reload the page |
-| `output_dir` | no | `<script_dir>/static` | Workspace directory for output |
 
 The script finds `main.tex` by searching upward from the given file. Port is resolved from `config.ini [workspaces]` by directory name.
 
@@ -151,7 +151,7 @@ Each instance auto-resolves its port from `config.ini [workspaces]` by directory
 ### 4. Compile to a specific workspace
 
 ```bash
-./compile_and_sync.sh /path/to/chapter.tex 42 1.0 1 ./alpha
+./compile_and_sync.sh /path/to/chapter.tex 42 ./alpha
 ```
 
 ## Nginx Reverse Proxy
